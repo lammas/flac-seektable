@@ -1,0 +1,25 @@
+{
+  "name": "flac-seektable",
+  "version": "0.1.0",
+  "description": "Generats evenly spaced seek points for FLAC data",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lammas/flac-seektable.git"
+  },
+  "keywords": [
+    "flac",
+    "seek",
+    "seektable",
+    "seekpoint"
+  ],
+  "author": "lammas",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/lammas/flac-seektable/issues"
+  },
+  "homepage": "https://github.com/lammas/flac-seektable#readme"
+}
