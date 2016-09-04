@@ -6,6 +6,8 @@
 #include <iostream>
 #include <queue>
 #include <string>
+#include <sstream>
+#include <iomanip>
 
 namespace flacseektable {
 
@@ -18,6 +20,8 @@ using v8::Local;
 using v8::Object;
 using v8::String;
 using v8::Value;
+using v8::Array;
+using v8::Number;
 
 using Nan::GetFunction;
 using Nan::New;
@@ -32,14 +36,55 @@ struct ClientData {
 	size_t position;
 	size_t absolutePosition;
 	bool end;
+
 	FLAC__StreamMetadata* seekBlock;
-	FLAC__uint64 audioOffset;
-	FLAC__uint64 totalSamples;
-	unsigned sampleRate;
+	FLAC__uint64 audio_offset;
+
+	// StreamInfo
+	unsigned min_blocksize;
+	unsigned max_blocksize;
+	unsigned min_framesize;
+	unsigned max_framesize;
+	unsigned sample_rate;
+	unsigned channels;
+	unsigned bits_per_sample;
+	FLAC__uint64 total_samples;
+	FLAC__byte md5sum[16];
+
+	// Seektable construction
 	FLAC__uint64 samples_written;
 	FLAC__uint64 last_offset;
 	unsigned first_seekpoint_to_check;
 };
+
+void zero_clientdata(ClientData* cd) {
+	assert(cd);
+
+	// Internal
+	cd->data = nullptr;
+	cd->length = 0;
+	cd->position = 0;
+	cd->absolutePosition = 0;
+	cd->end = 0;
+	cd->seekBlock = nullptr;
+	cd->audio_offset = 0;
+
+	// StreamInfo
+	cd->min_blocksize = 0;
+	cd->max_blocksize = 0;
+	cd->min_framesize = 0;
+	cd->max_framesize = 0;
+	cd->sample_rate = 0;
+	cd->channels = 0;
+	cd->bits_per_sample = 0;
+	cd->total_samples = 0;
+	memset(cd->md5sum, 0, sizeof(FLAC__byte) * 16);
+
+	// Seektable construction
+	cd->samples_written = 0;
+	cd->last_offset = 0;
+	cd->first_seekpoint_to_check = 0;
+}
 
 FLAC__StreamDecoder* decoder = nullptr;
 ClientData* clientData = nullptr;
@@ -69,15 +114,15 @@ void error_callback(const FLAC__StreamDecoder* decoder, FLAC__StreamDecoderError
 
 bool gen_template(const FLAC__StreamDecoder* decoder, ClientData* cd) {
 	assert(cd);
-	if (cd->totalSamples == 0)
+	if (cd->total_samples == 0)
 		return true;
-	assert(cd->sampleRate > 0);
-	unsigned samples = (unsigned)(1.0 * (double)cd->sampleRate);
+	assert(cd->sample_rate > 0);
+	unsigned samples = (unsigned)(1.0 * (double)cd->sample_rate);
 	/* Restrict seekpoints to two per second of audio. */
-	samples = samples < cd->sampleRate / 2 ? cd->sampleRate / 2 : samples;
+	samples = samples < cd->sample_rate / 2 ? cd->sample_rate / 2 : samples;
 	if (samples > 0) {
 		/* +1 for the initial point at sample 0 */
-		if (!FLAC__metadata_object_seektable_template_append_spaced_points_by_samples(cd->seekBlock, samples, cd->totalSamples))
+		if (!FLAC__metadata_object_seektable_template_append_spaced_points_by_samples(cd->seekBlock, samples, cd->total_samples))
 			return false;
 	}
 	return true;
@@ -90,11 +135,22 @@ void metadata_callback(const FLAC__StreamDecoder* decoder, const FLAC__StreamMet
 
 	switch (metadata->type) {
 		case FLAC__METADATA_TYPE_STREAMINFO:
-			cd->sampleRate = metadata->data.stream_info.sample_rate;
-			cd->totalSamples = metadata->data.stream_info.total_samples;
+			cd->sample_rate = metadata->data.stream_info.sample_rate;
+			cd->total_samples = metadata->data.stream_info.total_samples;
+
+			cd->min_blocksize = metadata->data.stream_info.min_blocksize;
+			cd->max_blocksize = metadata->data.stream_info.max_blocksize;
+			cd->min_framesize = metadata->data.stream_info.min_framesize;
+			cd->max_framesize = metadata->data.stream_info.max_framesize;
+			cd->sample_rate = metadata->data.stream_info.sample_rate;
+			cd->channels = metadata->data.stream_info.channels;
+			cd->bits_per_sample = metadata->data.stream_info.bits_per_sample;
+			cd->total_samples = metadata->data.stream_info.total_samples;
+			memcpy(cd->md5sum, metadata->data.stream_info.md5sum, sizeof(FLAC__byte) * 16);
+
 			std::cout << "\ttype: STREAMINFO block" << std::endl;
-			std::cout << "\tsample_rate: " << cd->sampleRate << std::endl;
-			std::cout << "\ttotal_samples: " << cd->totalSamples << std::endl;
+			std::cout << "\tsample_rate: " << cd->sample_rate << std::endl;
+			std::cout << "\ttotal_samples: " << cd->total_samples << std::endl;
 			break;
 		case FLAC__METADATA_TYPE_PADDING:
 			std::cout << "\ttype: PADDING block" << std::endl;
@@ -126,9 +182,9 @@ void metadata_callback(const FLAC__StreamDecoder* decoder, const FLAC__StreamMet
 	std::cout << "\tlength: " << metadata->length << std::endl;
 
 	if (metadata->is_last) {
-		FLAC__stream_decoder_get_decode_position(decoder, &cd->audioOffset);
-		std::cout << "AUDIO offset: " << cd->audioOffset << std::endl;
-		cd->last_offset = cd->audioOffset;
+		FLAC__stream_decoder_get_decode_position(decoder, &cd->audio_offset);
+		std::cout << "AUDIO offset: " << cd->audio_offset << std::endl;
+		cd->last_offset = cd->audio_offset;
 		cd->seekBlock = FLAC__metadata_object_new(FLAC__METADATA_TYPE_SEEKTABLE);
 		if (!gen_template(decoder, cd)) {
 			std::cout << "ERROR: gen_template failed" << std::endl;
@@ -157,7 +213,7 @@ FLAC__StreamDecoderWriteStatus write_callback(const FLAC__StreamDecoder* decoder
 		}
 		else if (test_sample >= frame_first_sample) {
 			seek_table->points[i].sample_number = frame_first_sample;
-			seek_table->points[i].stream_offset = cd->last_offset - cd->audioOffset;
+			seek_table->points[i].stream_offset = cd->last_offset - cd->audio_offset;
 			seek_table->points[i].frame_samples = blocksize;
 			cd->first_seekpoint_to_check++;
 			/* DO NOT: "break;" and here's why:
@@ -269,17 +325,7 @@ NAN_METHOD(init) {
 	FLAC__stream_decoder_set_metadata_respond(decoder, FLAC__METADATA_TYPE_VORBIS_COMMENT);
 
 	clientData = new ClientData();
-	clientData->data = nullptr;
-	clientData->length = 0;
-	clientData->position = 0;
-	clientData->absolutePosition = 0;
-	clientData->end = false;
-	clientData->seekBlock = nullptr;
-	clientData->totalSamples = 0;
-	clientData->sampleRate = 0;
-	clientData->samples_written = 0;
-	clientData->last_offset = 0;
-	clientData->first_seekpoint_to_check = 0;
+	zero_clientdata(clientData);
 
 	FLAC__StreamDecoderInitStatus status = FLAC__stream_decoder_init_stream(
 		decoder,
@@ -297,28 +343,55 @@ NAN_METHOD(init) {
 }
 
 NAN_METHOD(end) {
-	clientData->end = true;
 	// let the decoder know this is it
+	clientData->end = true;
 	process_buffers();
 
 	FLAC__StreamMetadata_SeekTable* seek_table = &clientData->seekBlock->data.seek_table;
-	unsigned duplicates = FLAC__format_seektable_sort(seek_table);
-	std::cout << "seektable sort: duplicates found: " << duplicates << std::endl;
-
-	std::cout << "seek points (" << seek_table->num_points << "):" << std::endl;
-	for (unsigned i=0; i<seek_table->num_points; ++i) {
-		std::cout << "#" << (i + 1) << ": " <<
-			"sample = " << seek_table->points[i].sample_number << "; " <<
-			"offset = " << seek_table->points[i].stream_offset << "; " <<
-			"frame samples = " << seek_table->points[i].frame_samples << std::endl;
-	}
+	FLAC__format_seektable_sort(seek_table);
 
 	std::cout << "[+] end" << std::endl;
 }
 
 NAN_METHOD(get_table) {
-	std::cout << "[+] get_table" << std::endl;
-	info.GetReturnValue().Set(1887);
+	if (!clientData->end) {
+		info.GetReturnValue().Set(false);
+		return;
+	}
+
+	Local<Object> ret = New<Object>();
+	Local<Array> seekpoints = New<Array>();
+
+	Set(ret, New("seekpoints").ToLocalChecked(), seekpoints);
+	Set(ret, New("audio_offset").ToLocalChecked(), New<Number>(clientData->audio_offset));
+
+	Set(ret, New("min_blocksize").ToLocalChecked(), New<Number>(clientData->min_blocksize));
+	Set(ret, New("max_blocksize").ToLocalChecked(), New<Number>(clientData->max_blocksize));
+	Set(ret, New("min_framesize").ToLocalChecked(), New<Number>(clientData->min_framesize));
+	Set(ret, New("max_framesize").ToLocalChecked(), New<Number>(clientData->max_framesize));
+	Set(ret, New("sample_rate").ToLocalChecked(), New<Number>(clientData->sample_rate));
+	Set(ret, New("channels").ToLocalChecked(), New<Number>(clientData->channels));
+	Set(ret, New("bits_per_sample").ToLocalChecked(), New<Number>(clientData->bits_per_sample));
+	Set(ret, New("total_samples").ToLocalChecked(), New<Number>(clientData->total_samples));
+
+	{
+		std::stringstream stream;
+		stream << std::hex;
+		for (uint8_t i=0; i<16; ++i) {
+			stream << (int)clientData->md5sum[i];
+		}
+		Set(ret, New("md5sum").ToLocalChecked(), New(stream.str()).ToLocalChecked());
+	}
+
+	FLAC__StreamMetadata_SeekTable* seek_table = &clientData->seekBlock->data.seek_table;
+	for (unsigned i=0; i<seek_table->num_points; ++i) {
+		Local<Object> pt = New<Object>();
+		Set(pt, New("sample").ToLocalChecked(), New<Number>(seek_table->points[i].sample_number));
+		Set(pt, New("offset").ToLocalChecked(), New<Number>(seek_table->points[i].stream_offset));
+		seekpoints->Set(i, pt);
+	}
+
+	info.GetReturnValue().Set(ret);
 }
 
 NAN_METHOD(clear) {
