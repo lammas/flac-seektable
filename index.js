@@ -6,8 +6,6 @@ const seektable = require('./build/Release/flac-seektable');
 class SeekTable extends stream.Transform {
 	constructor(callback, options) {
 		super(options);
-
-		console.log('seektable', seektable);
 		seektable.init();
 
 		this.on('end', function() {
@@ -19,6 +17,7 @@ class SeekTable extends stream.Transform {
 	}
 
 	_transform(chunk, encoding, done) {
+		console.log('JS:', chunk);
 		seektable.process_packet(chunk);
 
 		this.push(chunk);
