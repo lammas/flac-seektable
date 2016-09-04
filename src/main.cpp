@@ -90,6 +90,8 @@ FLAC__StreamDecoder* decoder = nullptr;
 ClientData* clientData = nullptr;
 
 void error_callback(const FLAC__StreamDecoder* decoder, FLAC__StreamDecoderErrorStatus status, void* client_data) {
+	// TODO: error callback to JS side
+
 	std::cout << "FLAC ERROR: " << status << std::endl;
 	std::cout << "\t";
 	switch (status) {
@@ -130,14 +132,8 @@ bool gen_template(const FLAC__StreamDecoder* decoder, ClientData* cd) {
 
 void metadata_callback(const FLAC__StreamDecoder* decoder, const FLAC__StreamMetadata* metadata, void* client_data) {
 	ClientData* cd = (ClientData*)client_data;
-
-	std::cout << "METADATA received:" << std::endl;
-
 	switch (metadata->type) {
 		case FLAC__METADATA_TYPE_STREAMINFO:
-			cd->sample_rate = metadata->data.stream_info.sample_rate;
-			cd->total_samples = metadata->data.stream_info.total_samples;
-
 			cd->min_blocksize = metadata->data.stream_info.min_blocksize;
 			cd->max_blocksize = metadata->data.stream_info.max_blocksize;
 			cd->min_framesize = metadata->data.stream_info.min_framesize;
@@ -147,34 +143,17 @@ void metadata_callback(const FLAC__StreamDecoder* decoder, const FLAC__StreamMet
 			cd->bits_per_sample = metadata->data.stream_info.bits_per_sample;
 			cd->total_samples = metadata->data.stream_info.total_samples;
 			memcpy(cd->md5sum, metadata->data.stream_info.md5sum, sizeof(FLAC__byte) * 16);
-
-			std::cout << "\ttype: STREAMINFO block" << std::endl;
-			std::cout << "\tsample_rate: " << cd->sample_rate << std::endl;
-			std::cout << "\ttotal_samples: " << cd->total_samples << std::endl;
-			break;
-		case FLAC__METADATA_TYPE_PADDING:
-			std::cout << "\ttype: PADDING block" << std::endl;
-			break;
-		case FLAC__METADATA_TYPE_APPLICATION:
-			std::cout << "\ttype: APPLICATION block" << std::endl;
-			break;
-		case FLAC__METADATA_TYPE_SEEKTABLE:
-			std::cout << "\ttype: SEEKTABLE block" << std::endl;
 			break;
 		case FLAC__METADATA_TYPE_VORBIS_COMMENT:
 			std::cout << "\ttype: VORBISCOMMENT block (a.k.a. FLAC tags)" << std::endl;
 			break;
+		case FLAC__METADATA_TYPE_PADDING:
+		case FLAC__METADATA_TYPE_APPLICATION:
+		case FLAC__METADATA_TYPE_SEEKTABLE:
 		case FLAC__METADATA_TYPE_CUESHEET:
-			std::cout << "\ttype: CUESHEET block" << std::endl;
-			break;
 		case FLAC__METADATA_TYPE_PICTURE:
-			std::cout << "\ttype: PICTURE block" << std::endl;
-			break;
 		case FLAC__METADATA_TYPE_UNDEFINED:
-			std::cout << "\ttype: UNDEFINED block" << std::endl;
-			break;
 		default:
-			std::cout << "\ttype: ERROR: not parsed" << std::endl;
 			break;
 	}
 
@@ -183,10 +162,10 @@ void metadata_callback(const FLAC__StreamDecoder* decoder, const FLAC__StreamMet
 
 	if (metadata->is_last) {
 		FLAC__stream_decoder_get_decode_position(decoder, &cd->audio_offset);
-		std::cout << "AUDIO offset: " << cd->audio_offset << std::endl;
 		cd->last_offset = cd->audio_offset;
 		cd->seekBlock = FLAC__metadata_object_new(FLAC__METADATA_TYPE_SEEKTABLE);
 		if (!gen_template(decoder, cd)) {
+			// TODO: JS error callback
 			std::cout << "ERROR: gen_template failed" << std::endl;
 		}
 	}
@@ -200,6 +179,7 @@ FLAC__StreamDecoderWriteStatus write_callback(const FLAC__StreamDecoder* decoder
 	assert(cd);
 
 	FLAC__StreamMetadata_SeekTable* seek_table = &cd->seekBlock->data.seek_table;
+	assert(seek_table);
 
 	const unsigned blocksize = frame->header.blocksize;
 	const FLAC__uint64 frame_first_sample = cd->samples_written;
@@ -317,12 +297,8 @@ NAN_METHOD(process_packet) {
 }
 
 NAN_METHOD(init) {
-	std::cout << "[+] init" << std::endl;
-
 	decoder = FLAC__stream_decoder_new();
-	// FLAC__stream_decoder_set_metadata_respond_all(decoder);
-	FLAC__stream_decoder_set_metadata_respond(decoder, FLAC__METADATA_TYPE_STREAMINFO);
-	FLAC__stream_decoder_set_metadata_respond(decoder, FLAC__METADATA_TYPE_VORBIS_COMMENT);
+	FLAC__stream_decoder_set_metadata_respond_all(decoder);
 
 	clientData = new ClientData();
 	zero_clientdata(clientData);
@@ -349,8 +325,6 @@ NAN_METHOD(end) {
 
 	FLAC__StreamMetadata_SeekTable* seek_table = &clientData->seekBlock->data.seek_table;
 	FLAC__format_seektable_sort(seek_table);
-
-	std::cout << "[+] end" << std::endl;
 }
 
 NAN_METHOD(get_table) {
@@ -395,8 +369,6 @@ NAN_METHOD(get_table) {
 }
 
 NAN_METHOD(clear) {
-	std::cout << "[+] clear" << std::endl;
-
 	// clean up
 	FLAC__metadata_object_delete(clientData->seekBlock);
 	FLAC__stream_decoder_delete(decoder);
@@ -406,11 +378,15 @@ NAN_METHOD(clear) {
 }
 
 void shutdown(void*) {
+	if (clientData) {
+		FLAC__metadata_object_delete(clientData->seekBlock);
+		delete clientData;
+		clientData = nullptr;
+	}
 	if (decoder) {
 		FLAC__stream_decoder_delete(decoder);
 		decoder = nullptr;
 	}
-	std::cout << "[+] shutdown" << std::endl;
 }
 
 NAN_MODULE_INIT(initialize) {
@@ -421,8 +397,6 @@ NAN_MODULE_INIT(initialize) {
 	NAN_EXPORT(target, end);
 	NAN_EXPORT(target, get_table);
 	NAN_EXPORT(target, clear);
-
-	std::cout << "[+] init" << std::endl;
 }
 
 NODE_MODULE(flacseektable, initialize)
