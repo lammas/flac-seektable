@@ -108,8 +108,9 @@ FLAC__StreamDecoderReadStatus read_callback(const FLAC__StreamDecoder* decoder, 
 		return FLAC__STREAM_DECODER_READ_STATUS_ABORT;
 	}
 
-	if (cd->buffers.size() == 0) {
-		std::cout << "==== END OF STREAM ====" << std::endl;
+	if (cd->buffers.size() == 0 && cd->end) {
+		std::cout << "==== END OF STREAM (top) ====" << std::endl;
+		*bytes = 0;
 		return FLAC__STREAM_DECODER_READ_STATUS_END_OF_STREAM;
 	}
 
@@ -144,8 +145,9 @@ FLAC__StreamDecoderReadStatus read_callback(const FLAC__StreamDecoder* decoder, 
 		cd->buffers.pop();
 	}
 
-	if (cd->buffers.size() == 0) {
-		std::cout << "==== END OF STREAM (end) ====" << std::endl;
+	if (cd->buffers.size() == 0 && cd->end) {
+		std::cout << "==== END OF STREAM (bottom) ====" << std::endl;
+		*bytes = 0;
 		return FLAC__STREAM_DECODER_READ_STATUS_END_OF_STREAM;
 	}
 
@@ -156,9 +158,7 @@ void process_buffers() {
 	while (1) {
 		std::cout << "==== PROCESS LOOP ====" << std::endl;
 		FLAC__bool status = FLAC__stream_decoder_process_single(decoder);
-		// std::cout << "FLAC__stream_decoder_process_single: " << status << std::endl;
 		if (!status) {
-			std::cout << "ERROR: FLAC__stream_decoder_process_single failed" << std::endl;
 			break;
 		}
 
@@ -166,9 +166,6 @@ void process_buffers() {
 			std::cout << "process_buffers: returning to get more data" << std::endl;
 			break;
 		}
-
-		if (clientData->end)
-			break;
 	}
 }
 
