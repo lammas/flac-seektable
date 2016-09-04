@@ -5,6 +5,7 @@
 #include <cstring>
 #include <iostream>
 #include <queue>
+#include <vector>
 #include <string>
 #include <sstream>
 #include <iomanip>
@@ -28,9 +29,13 @@ using Nan::New;
 using Nan::Set;
 
 typedef std::queue< std::string > BufferQueue;
+typedef std::vector< std::string > Tags;
 
 struct ClientData {
 	BufferQueue buffers;
+	Tags tags;
+	std::string vendor;
+
 	const char* data;
 	size_t length;
 	size_t position;
@@ -130,6 +135,10 @@ bool gen_template(const FLAC__StreamDecoder* decoder, ClientData* cd) {
 	return true;
 }
 
+std::string vorbis_to_string(const FLAC__StreamMetadata_VorbisComment_Entry& entry) {
+	return std::string((const char*)entry.entry, entry.length);
+}
+
 void metadata_callback(const FLAC__StreamDecoder* decoder, const FLAC__StreamMetadata* metadata, void* client_data) {
 	ClientData* cd = (ClientData*)client_data;
 	switch (metadata->type) {
@@ -144,9 +153,16 @@ void metadata_callback(const FLAC__StreamDecoder* decoder, const FLAC__StreamMet
 			cd->total_samples = metadata->data.stream_info.total_samples;
 			memcpy(cd->md5sum, metadata->data.stream_info.md5sum, sizeof(FLAC__byte) * 16);
 			break;
-		case FLAC__METADATA_TYPE_VORBIS_COMMENT:
-			std::cout << "\ttype: VORBISCOMMENT block (a.k.a. FLAC tags)" << std::endl;
-			break;
+
+		case FLAC__METADATA_TYPE_VORBIS_COMMENT: {
+			cd->vendor = vorbis_to_string(metadata->data.vorbis_comment.vendor_string);
+			const FLAC__StreamMetadata_VorbisComment_Entry* comments = metadata->data.vorbis_comment.comments;
+			for (unsigned i=0; i<metadata->data.vorbis_comment.num_comments; ++i) {
+				cd->tags.push_back(vorbis_to_string(comments[i]));
+			}
+		}
+		break;
+
 		case FLAC__METADATA_TYPE_PADDING:
 		case FLAC__METADATA_TYPE_APPLICATION:
 		case FLAC__METADATA_TYPE_SEEKTABLE:
@@ -156,9 +172,6 @@ void metadata_callback(const FLAC__StreamDecoder* decoder, const FLAC__StreamMet
 		default:
 			break;
 	}
-
-	std::cout << "\tis last: " << metadata->is_last << std::endl;
-	std::cout << "\tlength: " << metadata->length << std::endl;
 
 	if (metadata->is_last) {
 		FLAC__stream_decoder_get_decode_position(decoder, &cd->audio_offset);
@@ -267,7 +280,6 @@ FLAC__StreamDecoderReadStatus read_callback(const FLAC__StreamDecoder* decoder, 
 void process_buffers() {
 	while (1) {
 		FLAC__bool status = FLAC__stream_decoder_process_single(decoder);
-		// std::cout << "state: " << FLAC__stream_decoder_get_resolved_state_string(decoder) << std::endl;
 		if (!status) {
 			break;
 		}
@@ -348,6 +360,8 @@ NAN_METHOD(get_table) {
 	Set(ret, New("bits_per_sample").ToLocalChecked(), New<Number>(clientData->bits_per_sample));
 	Set(ret, New("total_samples").ToLocalChecked(), New<Number>(clientData->total_samples));
 
+	Set(ret, New("vendor").ToLocalChecked(), New(clientData->vendor).ToLocalChecked());
+
 	{
 		std::stringstream stream;
 		stream << std::hex;
@@ -355,6 +369,16 @@ NAN_METHOD(get_table) {
 			stream << (int)clientData->md5sum[i];
 		}
 		Set(ret, New("md5sum").ToLocalChecked(), New(stream.str()).ToLocalChecked());
+	}
+
+	{
+		Local<Array> tags = New<Array>();
+		unsigned index = 0;
+		for (Tags::const_iterator it = clientData->tags.begin(); it != clientData->tags.end(); ++it) {
+			tags->Set(index, New(*it).ToLocalChecked());
+			++index;
+		}
+		Set(ret, New("tags").ToLocalChecked(), tags);
 	}
 
 	FLAC__StreamMetadata_SeekTable* seek_table = &clientData->seekBlock->data.seek_table;
