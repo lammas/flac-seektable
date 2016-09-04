@@ -339,7 +339,7 @@ NAN_METHOD(end) {
 	FLAC__format_seektable_sort(seek_table);
 }
 
-NAN_METHOD(get_table) {
+NAN_METHOD(get_data) {
 	if (!clientData->end) {
 		info.GetReturnValue().Set(false);
 		return;
@@ -419,7 +419,7 @@ NAN_MODULE_INIT(initialize) {
 	NAN_EXPORT(target, init);
 	NAN_EXPORT(target, process_packet);
 	NAN_EXPORT(target, end);
-	NAN_EXPORT(target, get_table);
+	NAN_EXPORT(target, get_data);
 	NAN_EXPORT(target, clear);
 }
 

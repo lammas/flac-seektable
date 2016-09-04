@@ -11,7 +11,7 @@ class SeekTable extends stream.Transform {
 		this.on('end', function() {
 			seektable.end();
 			if (callback)
-				callback(seektable.get_table());
+				callback(seektable.get_data());
 			seektable.clear();
 		});
 	}
