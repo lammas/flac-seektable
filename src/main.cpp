@@ -36,6 +36,9 @@ struct ClientData {
 	FLAC__uint64 audioOffset;
 	FLAC__uint64 totalSamples;
 	unsigned sampleRate;
+	FLAC__uint64 samples_written;
+	FLAC__uint64 last_offset;
+	unsigned first_seekpoint_to_check;
 };
 
 FLAC__StreamDecoder* decoder = nullptr;
@@ -125,6 +128,7 @@ void metadata_callback(const FLAC__StreamDecoder* decoder, const FLAC__StreamMet
 	if (metadata->is_last) {
 		FLAC__stream_decoder_get_decode_position(decoder, &cd->audioOffset);
 		std::cout << "AUDIO offset: " << cd->audioOffset << std::endl;
+		cd->last_offset = cd->audioOffset;
 		cd->seekBlock = FLAC__metadata_object_new(FLAC__METADATA_TYPE_SEEKTABLE);
 		if (!gen_template(decoder, cd)) {
 			std::cout << "ERROR: gen_template failed" << std::endl;
@@ -132,7 +136,44 @@ void metadata_callback(const FLAC__StreamDecoder* decoder, const FLAC__StreamMet
 	}
 }
 
+/** The method of determining the actual seek point values is mostly taken from the metaflac tool. */
 FLAC__StreamDecoderWriteStatus write_callback(const FLAC__StreamDecoder* decoder, const FLAC__Frame* frame, const FLAC__int32 * const buffer[], void *client_data) {
+	ClientData* cd = (ClientData*)client_data;
+
+	(void)buffer;
+	assert(cd);
+
+	FLAC__StreamMetadata_SeekTable* seek_table = &cd->seekBlock->data.seek_table;
+
+	const unsigned blocksize = frame->header.blocksize;
+	const FLAC__uint64 frame_first_sample = cd->samples_written;
+	const FLAC__uint64 frame_last_sample = frame_first_sample + (FLAC__uint64)blocksize - 1;
+	FLAC__uint64 test_sample;
+	unsigned i;
+	for (i = cd->first_seekpoint_to_check; i < seek_table->num_points; i++) {
+		test_sample = seek_table->points[i].sample_number;
+		if (test_sample > frame_last_sample) {
+			break;
+		}
+		else if (test_sample >= frame_first_sample) {
+			seek_table->points[i].sample_number = frame_first_sample;
+			seek_table->points[i].stream_offset = cd->last_offset - cd->audioOffset;
+			seek_table->points[i].frame_samples = blocksize;
+			cd->first_seekpoint_to_check++;
+			/* DO NOT: "break;" and here's why:
+			 * The seektable template may contain more than one target
+			 * sample for any given frame; we will keep looping, generating
+			 * duplicate seekpoints for them, and we'll clean it up later,
+			 * just before writing the seektable back to the metadata.
+			 */
+		}
+		else {
+			cd->first_seekpoint_to_check++;
+		}
+	}
+	cd->samples_written += blocksize;
+	if(!FLAC__stream_decoder_get_decode_position(decoder, &cd->last_offset))
+		return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
 	return FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;
 }
 
@@ -150,14 +191,11 @@ FLAC__StreamDecoderReadStatus read_callback(const FLAC__StreamDecoder* decoder, 
 		return FLAC__STREAM_DECODER_READ_STATUS_ABORT;
 	}
 
+	// Make sure we have data to operate with
 	if (cd->buffers.size() == 0 && cd->end) {
-		// std::cout << "==== END OF STREAM (top) ====" << std::endl;
 		*bytes = 0;
 		return FLAC__STREAM_DECODER_READ_STATUS_END_OF_STREAM;
 	}
-
-	// std::cout << "==== READ CALLBACK: buffer count: " << cd->buffers.size() << std::endl;
-	// std::cout << "decode buffer size: " << (*bytes) << std::endl;
 
 	if (!cd->data) {
 		std::string& buf = cd->buffers.front();
@@ -167,12 +205,7 @@ FLAC__StreamDecoderReadStatus read_callback(const FLAC__StreamDecoder* decoder, 
 	}
 
 	size_t chunkLength = cd->length - cd->position;
-	// std::cout << "remaining: " << chunkLength << std::endl;
 	chunkLength = chunkLength > *bytes ? *bytes : chunkLength;
-
-	// std::cout << "chunkLength: " << chunkLength << std::endl;
-	// std::cout << "length: " << cd->length << std::endl;
-	// std::cout << "position: " << cd->position << std::endl;
 
 	memcpy(buffer, cd->data + cd->position, chunkLength);
 	cd->position += chunkLength;
@@ -181,35 +214,30 @@ FLAC__StreamDecoderReadStatus read_callback(const FLAC__StreamDecoder* decoder, 
 
 	// When at the end of the first buffer, switch to the next one
 	if (cd->position == cd->length) {
-		// std::cout << "==== MOVING TO NEXT BUFFER" << std::endl;
 		cd->position = 0;
 		cd->length = 0;
 		cd->data = nullptr;
 		cd->buffers.pop();
 	}
 
+	// End the stream if we're out of data
 	if (cd->buffers.size() == 0 && cd->end) {
-		// std::cout << "==== END OF STREAM (bottom) ====" << std::endl;
 		*bytes = 0;
 		return FLAC__STREAM_DECODER_READ_STATUS_END_OF_STREAM;
 	}
-
 	return FLAC__STREAM_DECODER_READ_STATUS_CONTINUE;
 }
 
 void process_buffers() {
 	while (1) {
-		// FLAC__uint64 pos = 0;
-		// FLAC__stream_decoder_get_decode_position(decoder, &pos);
-		// std::cout << "decoder pos: " << pos << std::endl;
 		FLAC__bool status = FLAC__stream_decoder_process_single(decoder);
-		// std::cout << "state: " << FLAC__stream_decoder_get_state(decoder) << " " << FLAC__stream_decoder_get_resolved_state_string(decoder) << std::endl;
+		// std::cout << "state: " << FLAC__stream_decoder_get_resolved_state_string(decoder) << std::endl;
 		if (!status) {
 			break;
 		}
 
+		// Return to allow more data to be passed from the JS side
 		if (!clientData->end && clientData->buffers.size() < 2) {
-			// std::cout << "process_buffers: returning to get more data" << std::endl;
 			break;
 		}
 	}
@@ -220,8 +248,6 @@ NAN_METHOD(process_packet) {
 		Nan::ThrowError("process_packet: requires 1 argument: buffer");
 		return;
 	}
-
-	// std::cout << "==== process_packet(chunk) ====" << std::endl;
 
 	Local<Object> bufferObj = info[0]->ToObject();
 	size_t bufferLength = node::Buffer::Length(bufferObj);
@@ -249,6 +275,9 @@ NAN_METHOD(init) {
 	clientData->seekBlock = nullptr;
 	clientData->totalSamples = 0;
 	clientData->sampleRate = 0;
+	clientData->samples_written = 0;
+	clientData->last_offset = 0;
+	clientData->first_seekpoint_to_check = 0;
 
 	FLAC__StreamDecoderInitStatus status = FLAC__stream_decoder_init_stream(
 		decoder,
@@ -269,6 +298,18 @@ NAN_METHOD(end) {
 	clientData->end = true;
 	// let the decoder know this is it
 	process_buffers();
+
+	FLAC__StreamMetadata_SeekTable* seek_table = &clientData->seekBlock->data.seek_table;
+	unsigned duplicates = FLAC__format_seektable_sort(seek_table);
+	std::cout << "seektable sort: duplicates found: " << duplicates << std::endl;
+
+	std::cout << "seek points (" << seek_table->num_points << "):" << std::endl;
+	for (unsigned i=0; i<seek_table->num_points; ++i) {
+		std::cout << "#" << (i + 1) << ": " <<
+			"sample = " << seek_table->points[i].sample_number << "; " <<
+			"offset = " << seek_table->points[i].stream_offset << "; " <<
+			"frame samples = " << seek_table->points[i].frame_samples << std::endl;
+	}
 
 	std::cout << "[+] end" << std::endl;
 }
