@@ -21,5 +21,12 @@
   "bugs": {
     "url": "https://github.com/lammas/flac-seektable/issues"
   },
-  "homepage": "https://github.com/lammas/flac-seektable#readme"
+  "homepage": "https://github.com/lammas/flac-seektable#readme",
+  "devDependencies": {
+    "tap-spec": "^4.1.1",
+    "tape": "^4.6.0"
+  },
+  "dependencies": {
+    "nan": "^2.4.0"
+  }
 }
