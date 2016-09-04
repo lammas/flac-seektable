@@ -264,7 +264,9 @@ NAN_METHOD(init) {
 	std::cout << "[+] init" << std::endl;
 
 	decoder = FLAC__stream_decoder_new();
-	FLAC__stream_decoder_set_metadata_respond_all(decoder);
+	// FLAC__stream_decoder_set_metadata_respond_all(decoder);
+	FLAC__stream_decoder_set_metadata_respond(decoder, FLAC__METADATA_TYPE_STREAMINFO);
+	FLAC__stream_decoder_set_metadata_respond(decoder, FLAC__METADATA_TYPE_VORBIS_COMMENT);
 
 	clientData = new ClientData();
 	clientData->data = nullptr;

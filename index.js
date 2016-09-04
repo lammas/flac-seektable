@@ -17,9 +17,7 @@ class SeekTable extends stream.Transform {
 	}
 
 	_transform(chunk, encoding, done) {
-		// console.log('JS:', chunk);
 		seektable.process_packet(chunk);
-
 		this.push(chunk);
 		done();
 	}
