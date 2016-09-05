@@ -1,7 +1,7 @@
 {
   "name": "flac-seektable",
   "version": "0.1.0",
-  "description": "Generats evenly spaced seek points for FLAC data",
+  "description": "Stream tap for generating a seek table for a FLAC file stream.",
   "main": "index.js",
   "scripts": {
     "test": "node test/test | tap-spec"
