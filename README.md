@@ -32,7 +32,7 @@ var writer = fs.createWriteStream('output.flac');
 reader
 	.pipe(new seektable(function(data) {
 		console.log(data);
-		/* would output a structure similar to this:
+		/* would output a structure similar to this (or false in case an error occurred):
 		{
 			seekpoints: [
 				{ sample: 0, offset: 0 },
@@ -59,4 +59,17 @@ reader
 		*/
 	}))
 	.pipe(writer);
+```
+
+### The seekpoints
+
+```javascript
+{
+	sample: 123, // The sample number
+	offset: 321  // The offset from the start of the audio stream
+}
+
+// The absolute seek position in the FLAC file would then be:
+data.audio_offset + data.seekpoints[n].offset
+// Where n is an integer in the range [0, data.seekpoints.length)
 ```
