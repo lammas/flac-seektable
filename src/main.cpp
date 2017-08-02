@@ -288,6 +288,9 @@ void process_buffers() {
 		if (!clientData->end && clientData->buffers.size() < 2) {
 			break;
 		}
+
+		if (clientData->end)
+			break;
 	}
 }
 
