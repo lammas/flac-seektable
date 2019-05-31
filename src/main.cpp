@@ -300,7 +300,7 @@ NAN_METHOD(process_packet) {
 		return;
 	}
 
-	Local<Object> bufferObj = info[0]->ToObject();
+	Local<Object> bufferObj = info[0]->ToObject(v8::Isolate::GetCurrent());
 	size_t bufferLength = node::Buffer::Length(bufferObj);
 	char* bufferData = node::Buffer::Data(bufferObj);
 	if (bufferLength == 0 || !bufferData) {
