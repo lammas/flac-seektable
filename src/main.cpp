@@ -300,7 +300,9 @@ NAN_METHOD(process_packet) {
 		return;
 	}
 
-	Local<Object> bufferObj = info[0]->ToObject(v8::Isolate::GetCurrent());
+	v8::Local<v8::Context> context = info.GetIsolate()->GetCurrentContext();
+	Local<Object> bufferObj = info[0]->ToObject(context).ToLocalChecked();
+
 	size_t bufferLength = node::Buffer::Length(bufferObj);
 	char* bufferData = node::Buffer::Data(bufferObj);
 	if (bufferLength == 0 || !bufferData) {
@@ -348,6 +350,8 @@ NAN_METHOD(get_data) {
 		return;
 	}
 
+	v8::Local<v8::Context> context = info.GetIsolate()->GetCurrentContext();
+
 	Local<Object> ret = New<Object>();
 	Local<Array> seekpoints = New<Array>();
 
@@ -378,7 +382,7 @@ NAN_METHOD(get_data) {
 		Local<Array> tags = New<Array>();
 		unsigned index = 0;
 		for (Tags::const_iterator it = clientData->tags.begin(); it != clientData->tags.end(); ++it) {
-			tags->Set(index, New(*it).ToLocalChecked());
+			tags->Set(context, index, New(*it).ToLocalChecked());
 			++index;
 		}
 		Set(ret, New("tags").ToLocalChecked(), tags);
@@ -389,7 +393,7 @@ NAN_METHOD(get_data) {
 		Local<Object> pt = New<Object>();
 		Set(pt, New("sample").ToLocalChecked(), New<Number>(seek_table->points[i].sample_number));
 		Set(pt, New("offset").ToLocalChecked(), New<Number>(seek_table->points[i].stream_offset));
-		seekpoints->Set(i, pt);
+		seekpoints->Set(context, i, pt);
 	}
 
 	info.GetReturnValue().Set(ret);
