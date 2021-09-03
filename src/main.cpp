@@ -12,7 +12,7 @@
 
 namespace flacseektable {
 
-using node::AtExit;
+using node::AddEnvironmentCleanupHook;
 
 using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
@@ -93,6 +93,8 @@ void zero_clientdata(ClientData* cd) {
 
 FLAC__StreamDecoder* decoder = nullptr;
 ClientData* clientData = nullptr;
+
+void shutdown(void*);
 
 void error_callback(const FLAC__StreamDecoder* decoder, FLAC__StreamDecoderErrorStatus status, void* client_data) {
 	// TODO: error callback to JS side
@@ -314,6 +316,8 @@ NAN_METHOD(process_packet) {
 }
 
 NAN_METHOD(init) {
+	AddEnvironmentCleanupHook(info.GetIsolate(), &shutdown, NULL);
+
 	decoder = FLAC__stream_decoder_new();
 	FLAC__stream_decoder_set_metadata_respond_all(decoder);
 
@@ -382,7 +386,7 @@ NAN_METHOD(get_data) {
 		Local<Array> tags = New<Array>();
 		unsigned index = 0;
 		for (Tags::const_iterator it = clientData->tags.begin(); it != clientData->tags.end(); ++it) {
-			tags->Set(context, index, New(*it).ToLocalChecked());
+			tags->Set(context, index, New(*it).ToLocalChecked()).Check();
 			++index;
 		}
 		Set(ret, New("tags").ToLocalChecked(), tags);
@@ -393,7 +397,7 @@ NAN_METHOD(get_data) {
 		Local<Object> pt = New<Object>();
 		Set(pt, New("sample").ToLocalChecked(), New<Number>(seek_table->points[i].sample_number));
 		Set(pt, New("offset").ToLocalChecked(), New<Number>(seek_table->points[i].stream_offset));
-		seekpoints->Set(context, i, pt);
+		seekpoints->Set(context, i, pt).Check();
 	}
 
 	info.GetReturnValue().Set(ret);
@@ -421,8 +425,6 @@ void shutdown(void*) {
 }
 
 NAN_MODULE_INIT(initialize) {
-	AtExit(shutdown);
-
 	NAN_EXPORT(target, init);
 	NAN_EXPORT(target, process_packet);
 	NAN_EXPORT(target, end);
