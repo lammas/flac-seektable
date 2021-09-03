@@ -1,6 +1,6 @@
 {
   "name": "flac-seektable",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Stream tap for generating a seek table for a FLAC file stream.",
   "main": "index.js",
   "scripts": {
