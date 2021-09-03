@@ -24,7 +24,9 @@
   "homepage": "https://github.com/lammas/flac-seektable#readme",
   "devDependencies": {
     "tap-spec": "^5.0.0",
-    "tape": "^4.10.1"
+    "tape": "^4.10.1",
+    "trim": ">=0.0.3",
+    "path-parse": ">=1.0.7"
   },
   "dependencies": {
     "nan": "^2.15.0"
